@@ -74,6 +74,7 @@ app = FastAPI(
 origens = [
     "http://localhost:5500",
     "http://127.0.0.1:5500",
+    "https://agenda-yu4z.onrender.com"
 ]
 frontend_url = os.getenv("FRONTEND_URL")
 if frontend_url:
