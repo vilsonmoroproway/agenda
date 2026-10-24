@@ -1,0 +1,234 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Cadastro de Contatos</title>
+    <style>
+        * { box-sizing: border-box; }
+        body {
+            margin: 0; padding: 30px 16px; font-family: Arial, sans-serif;
+            background: #f1f5f9; color: #1e293b;
+        }
+        main { max-width: 900px; margin: auto; }
+        h1, h2 { color: #0f172a; }
+        .painel {
+            background: white; padding: 24px; margin-bottom: 24px;
+            border-radius: 10px; box-shadow: 0 2px 8px #0000000d;
+        }
+        label { display: block; margin-top: 14px; margin-bottom: 6px; font-weight: bold; }
+        input {
+            width: 100%; padding: 11px; border: 1px solid #cbd5e1;
+            border-radius: 5px; font-size: 16px;
+        }
+        button {
+            padding: 10px 14px; margin-top: 16px; margin-right: 6px;
+            border: 0; border-radius: 5px; cursor: pointer;
+        }
+        button:focus-visible, input:focus-visible { outline: 2px solid #2563eb; outline-offset: 2px; }
+        .principal { background: #2563eb; color: white; }
+        .editar { background: #eab308; }
+        .excluir { background: #dc2626; color: white; }
+        .cancelar { background: #e2e8f0; }
+        .tabela-container { overflow-x: auto; }
+        table { width: 100%; border-collapse: collapse; }
+        th, td { padding: 12px; border-bottom: 1px solid #e2e8f0; text-align: left; }
+        th { background: #f8fafc; }
+        #mensagem { margin-top: 14px; white-space: pre-wrap; }
+        @media (max-width: 600px) {
+            body { padding: 16px 8px; }
+            .painel { padding: 16px; }
+        }
+    </style>
+</head>
+<body>
+<main>
+    <h1>Agenda de Contatos</h1>
+
+    <section class="painel">
+        <h2 id="titulo-form">Cadastrar contato</h2>
+        <form id="form-contato">
+            <label for="nome">Nome</label>
+            <input id="nome" name="nome" minlength="2" maxlength="100" required>
+
+            <label for="email">E-mail</label>
+            <input id="email" name="email" type="email" maxlength="150" required>
+
+            <label for="telefone">Telefone</label>
+            <input id="telefone" name="telefone" type="tel"
+                   minlength="8" maxlength="30" required>
+
+            <button type="submit" class="principal" id="btn-salvar">Cadastrar</button>
+            <button type="button" class="cancelar" id="btn-cancelar" hidden>
+                Cancelar edição
+            </button>
+        </form>
+        <p id="mensagem" role="status" aria-live="polite"></p>
+    </section>
+
+    <section class="painel">
+        <h2>Contatos cadastrados</h2>
+        <button type="button" class="principal" id="btn-atualizar">Atualizar lista</button>
+        <div class="tabela-container">
+            <table>
+                <thead>
+                    <tr>
+                        <th>ID</th><th>Nome</th><th>E-mail</th><th>Telefone</th><th>Ações</th>
+                    </tr>
+                </thead>
+                <tbody id="lista-contatos"></tbody>
+            </table>
+        </div>
+    </section>
+</main>
+
+<script>
+    // Local: http://127.0.0.1:8000
+    // Produção: substitua pela URL pública da API no Render, sem barra final.
+    const API_URL = "http://127.0.0.1:8000";
+
+    const formulario = document.getElementById("form-contato");
+    const lista = document.getElementById("lista-contatos");
+    const mensagem = document.getElementById("mensagem");
+    const titulo = document.getElementById("titulo-form");
+    const botaoSalvar = document.getElementById("btn-salvar");
+    const botaoCancelar = document.getElementById("btn-cancelar");
+    let idEmEdicao = null;
+
+    function mostrarMensagem(texto, erro = false) {
+        mensagem.textContent = texto;
+        mensagem.style.color = erro ? "#b91c1c" : "#15803d";
+    }
+
+    async function requisicao(caminho, opcoes = {}) {
+        const resposta = await fetch(`${API_URL}${caminho}`, {
+            ...opcoes,
+            headers: {
+                ...(opcoes.body ? { "Content-Type": "application/json" } : {}),
+                ...opcoes.headers
+            }
+        });
+
+        if (!resposta.ok) {
+            let detalhe = `Erro HTTP ${resposta.status}`;
+            try {
+                const dadosErro = await resposta.json();
+                detalhe = Array.isArray(dadosErro.detail)
+                    ? dadosErro.detail.map(item => item.msg).join("; ")
+                    : (dadosErro.detail || detalhe);
+            } catch (_) {}
+            throw new Error(detalhe);
+        }
+
+        if (resposta.status === 204) return null;
+        return resposta.json();
+    }
+
+    async function carregarContatos() {
+        try {
+            const contatos = await requisicao("/contatos/");
+            lista.replaceChildren();
+
+            if (contatos.length === 0) {
+                const linha = document.createElement("tr");
+                const celula = document.createElement("td");
+                celula.colSpan = 5;
+                celula.textContent = "Nenhum contato cadastrado.";
+                linha.appendChild(celula);
+                lista.appendChild(linha);
+                return;
+            }
+
+            contatos.forEach(contato => {
+                const linha = document.createElement("tr");
+
+                [contato.id, contato.nome, contato.email, contato.telefone]
+                    .forEach(valor => {
+                        const celula = document.createElement("td");
+                        celula.textContent = valor;
+                        linha.appendChild(celula);
+                    });
+
+                const acoes = document.createElement("td");
+                const editar = document.createElement("button");
+                editar.textContent = "Editar";
+                editar.className = "editar";
+                editar.type = "button";
+                editar.addEventListener("click", () => iniciarEdicao(contato));
+
+                const excluir = document.createElement("button");
+                excluir.textContent = "Excluir";
+                excluir.className = "excluir";
+                excluir.type = "button";
+                excluir.addEventListener("click", () => excluirContato(contato));
+
+                acoes.append(editar, excluir);
+                linha.appendChild(acoes);
+                lista.appendChild(linha);
+            });
+        } catch (erro) {
+            mostrarMensagem("Não foi possível carregar os contatos: " + erro.message, true);
+        }
+    }
+
+    formulario.addEventListener("submit", async evento => {
+        evento.preventDefault();
+        const dados = {
+            nome: formulario.elements.nome.value.trim(),
+            email: formulario.elements.email.value.trim(),
+            telefone: formulario.elements.telefone.value.trim()
+        };
+        const editando = idEmEdicao !== null;
+        const caminho = editando ? `/contatos/${idEmEdicao}` : "/contatos/";
+
+        try {
+            await requisicao(caminho, {
+                method: editando ? "PUT" : "POST",
+                body: JSON.stringify(dados)
+            });
+            mostrarMensagem(editando ? "Contato atualizado com sucesso!" : "Contato cadastrado com sucesso!");
+            cancelarEdicao();
+            await carregarContatos();
+        } catch (erro) {
+            mostrarMensagem("Não foi possível salvar: " + erro.message, true);
+        }
+    });
+
+    function iniciarEdicao(contato) {
+        idEmEdicao = contato.id;
+        formulario.elements.nome.value = contato.nome;
+        formulario.elements.email.value = contato.email;
+        formulario.elements.telefone.value = contato.telefone;
+        titulo.textContent = "Editar contato";
+        botaoSalvar.textContent = "Salvar alterações";
+        botaoCancelar.hidden = false;
+        document.getElementById("nome").focus();
+    }
+
+    function cancelarEdicao() {
+        idEmEdicao = null;
+        formulario.reset();
+        titulo.textContent = "Cadastrar contato";
+        botaoSalvar.textContent = "Cadastrar";
+        botaoCancelar.hidden = true;
+    }
+
+    botaoCancelar.addEventListener("click", cancelarEdicao);
+
+    async function excluirContato(contato) {
+        if (!confirm(`Deseja excluir o contato ${contato.nome}?`)) return;
+        try {
+            await requisicao(`/contatos/${contato.id}`, { method: "DELETE" });
+            if (idEmEdicao === contato.id) cancelarEdicao();
+            mostrarMensagem("Contato excluído com sucesso!");
+            await carregarContatos();
+        } catch (erro) {
+            mostrarMensagem("Não foi possível excluir: " + erro.message, true);
+        }
+    }
+
+    document.getElementById("btn-atualizar").addEventListener("click", carregarContatos);
+    carregarContatos();
+</script>
+</body>
+</html>
